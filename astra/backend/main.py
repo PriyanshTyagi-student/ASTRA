@@ -1,9 +1,15 @@
 """Compatibility entrypoint for the modular ASTRA backend."""
 
+import uvicorn
+
+from app.core.config import settings
 from app.main import app
 
 
 if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run(
+        "app.main:app",
+        host=settings.backend_host,
+        port=settings.backend_port,
+        reload=settings.debug,
+    )

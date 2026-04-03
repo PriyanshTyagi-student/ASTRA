@@ -19,7 +19,7 @@ class Settings:
         self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
         self.ai_provider = os.getenv("AI_PROVIDER", "gemini").lower()
         self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        self.backend_host = os.getenv("HOST", "127.0.0.1")
+        self.backend_host = os.getenv("HOST", "0.0.0.0")
         self.backend_port = int(os.getenv("PORT", "8000"))
         self.debug = os.getenv("DEBUG", "true").lower() == "true"
         self.memory_db_path = os.getenv("MEMORY_DB_PATH", str(BASE_DIR / "astra.db"))

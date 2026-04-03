@@ -43,7 +43,7 @@ PORT=8000
 ## 🚀 Running the Backend
 
 ```bash
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The backend will be available at `http://localhost:8000`
@@ -194,6 +194,12 @@ logging.basicConfig(level=logging.INFO)
 ```bash
 pip install gunicorn
 gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app
+```
+
+### Render
+Use a start command that binds to the public interface:
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
 ### Docker
