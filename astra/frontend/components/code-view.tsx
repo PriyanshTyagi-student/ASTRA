@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Copy, Download, Send, Chrome, Code } from 'lucide-react'
+import { Copy, Download, Send, ExternalLink, Code } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -23,6 +23,28 @@ export function CodeEditor({ filename = 'generated.js', code, language, projectN
   const [saveStatus, setSaveStatus] = useState('')
   const [previewPath, setPreviewPath] = useState('')
   const [copied, setCopied] = useState(false)
+
+  const canRenderPreviewInIframe = () => {
+    if (!previewPath) {
+      return false
+    }
+
+    // Data/blob URLs are generated locally and safe to preview in the sandboxed iframe.
+    if (previewPath.startsWith('data:') || previewPath.startsWith('blob:')) {
+      return true
+    }
+
+    if (typeof window === 'undefined') {
+      return false
+    }
+
+    try {
+      const previewUrl = new URL(previewPath, window.location.href)
+      return previewUrl.origin === window.location.origin
+    } catch {
+      return false
+    }
+  }
 
   // Try to load preview if HTML file
   useEffect(() => {
@@ -122,13 +144,26 @@ export function CodeEditor({ filename = 'generated.js', code, language, projectN
         {/* Preview Tab */}
         {(language === 'html' || previewPath) && (
           <TabsContent value="preview" className="flex-1 overflow-hidden">
-            {previewPath ? (
+            {previewPath && canRenderPreviewInIframe() ? (
               <iframe
                 src={previewPath}
                 className="w-full h-full border-none"
                 title="Code preview"
                 sandbox="allow-scripts allow-same-origin"
               />
+            ) : previewPath ? (
+              <div className="h-full flex flex-col items-center justify-center gap-3 text-zinc-400 px-6 text-center">
+                <p>This preview URL cannot be safely embedded in an iframe.</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => window.open(previewPath, '_blank', 'noopener,noreferrer')}
+                  className="gap-2"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open Preview in New Tab
+                </Button>
+              </div>
             ) : (
               <div className="flex items-center justify-center h-full text-zinc-500">
                 <p>No preview available for this file type</p>
