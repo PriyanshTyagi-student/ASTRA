@@ -1,0 +1,252 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #0a0a0f;
+  --foreground: #e0e0e6;
+  --card: #141420;
+  --card-foreground: #e0e0e6;
+  --popover: #141420;
+  --popover-foreground: #e0e0e6;
+  --primary: #00d9ff;
+  --primary-foreground: #0a0a0f;
+  --secondary: #b100ff;
+  --secondary-foreground: #ffffff;
+  --muted: #404050;
+  --muted-foreground: #a0a0a6;
+  --accent: #ff00ff;
+  --accent-foreground: #0a0a0f;
+  --destructive: #ff3333;
+  --destructive-foreground: #ffffff;
+  --border: #1a1a2e;
+  --input: #1a1a2e;
+  --ring: #00d9ff;
+  --chart-1: #00d9ff;
+  --chart-2: #b100ff;
+  --chart-3: #ff00ff;
+  --chart-4: #00ff88;
+  --chart-5: #ffaa00;
+  --radius: 0.625rem;
+  --sidebar: #0f0f17;
+  --sidebar-foreground: #e0e0e6;
+  --sidebar-primary: #00d9ff;
+  --sidebar-primary-foreground: #0a0a0f;
+  --sidebar-accent: #b100ff;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #1a1a2e;
+  --sidebar-ring: #00d9ff;
+  --neon-blue: #00d9ff;
+  --neon-violet: #b100ff;
+  --neon-magenta: #ff00ff;
+  --neon-green: #00ff88;
+  --neon-orange: #ffaa00;
+}
+
+.dark {
+  --background: #0a0a0f;
+  --foreground: #e0e0e6;
+  --card: #141420;
+  --card-foreground: #e0e0e6;
+  --popover: #141420;
+  --popover-foreground: #e0e0e6;
+  --primary: #00d9ff;
+  --primary-foreground: #0a0a0f;
+  --secondary: #b100ff;
+  --secondary-foreground: #ffffff;
+  --muted: #404050;
+  --muted-foreground: #a0a0a6;
+  --accent: #ff00ff;
+  --accent-foreground: #0a0a0f;
+  --destructive: #ff3333;
+  --destructive-foreground: #ffffff;
+  --border: #1a1a2e;
+  --input: #1a1a2e;
+  --ring: #00d9ff;
+  --chart-1: #00d9ff;
+  --chart-2: #b100ff;
+  --chart-3: #ff00ff;
+  --chart-4: #00ff88;
+  --chart-5: #ffaa00;
+  --sidebar: #0f0f17;
+  --sidebar-foreground: #e0e0e6;
+  --sidebar-primary: #00d9ff;
+  --sidebar-primary-foreground: #0a0a0f;
+  --sidebar-accent: #b100ff;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #1a1a2e;
+  --sidebar-ring: #00d9ff;
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback';
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .glassmorphism {
+    @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+
+  .neon-glow-blue {
+    @apply text-[#00d9ff];
+    text-shadow: 0 0 10px rgba(0, 217, 255, 0.5), 0 0 20px rgba(0, 217, 255, 0.3);
+  }
+
+  .neon-glow-violet {
+    @apply text-[#b100ff];
+    text-shadow: 0 0 10px rgba(177, 0, 255, 0.5), 0 0 20px rgba(177, 0, 255, 0.3);
+  }
+
+  .glow-box-blue {
+    box-shadow: 0 0 20px rgba(0, 217, 255, 0.3), 0 0 40px rgba(0, 217, 255, 0.15);
+  }
+
+  .glow-box-violet {
+    box-shadow: 0 0 20px rgba(177, 0, 255, 0.3), 0 0 40px rgba(177, 0, 255, 0.15);
+  }
+
+  .glow-box-dual {
+    box-shadow: 0 0 20px rgba(0, 217, 255, 0.25), 0 0 20px rgba(177, 0, 255, 0.2), inset 0 0 20px rgba(255, 255, 255, 0.05);
+  }
+
+  .border-glow {
+    @apply border border-[#1a1a2e];
+    box-shadow: inset 0 0 10px rgba(0, 217, 255, 0.1);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(0, 217, 255, 0.3), 0 0 40px rgba(0, 217, 255, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(0, 217, 255, 0.5), 0 0 60px rgba(0, 217, 255, 0.25);
+  }
+}
+
+@keyframes pulse-glow-violet {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(177, 0, 255, 0.3), 0 0 40px rgba(177, 0, 255, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(177, 0, 255, 0.5), 0 0 60px rgba(177, 0, 255, 0.25);
+  }
+}
+
+@keyframes typing {
+  0%, 50%, 100% {
+    opacity: 1;
+  }
+  25%, 75% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes rotate-slow {
+  from {
+    transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg);
+  }
+  to {
+    transform: rotateX(360deg) rotateY(360deg) rotateZ(360deg);
+  }
+}
+
+@keyframes stream-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scan-line {
+  0% {
+    top: 0;
+  }
+  100% {
+    top: 100%;
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-pulse-glow-violet {
+  animation: pulse-glow-violet 2s ease-in-out infinite;
+}
+
+.animate-typing {
+  animation: typing 1.5s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+.animate-rotate-slow {
+  animation: rotate-slow 8s linear infinite;
+}
+
+.animate-stream-in {
+  animation: stream-in 0.5s ease-out;
+}
