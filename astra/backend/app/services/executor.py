@@ -20,16 +20,26 @@ class Executor:
         plan: Iterable[Any],
         project_name: str | None = None,
         request_text: str | None = None,
+        execute: bool = False,
     ) -> dict:
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         safe_project_name = (project_name or "astra_project").strip().replace(" ", "_")
-        output_dir = settings.generated_dir / f"{safe_project_name}_{timestamp}"
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         normalized_steps = list(plan)
         execution_log: list[str] = []
         for index, step in enumerate(normalized_steps, start=1):
             execution_log.append(f"Step {index}: {self._format_step(step)}")
+
+        if not execute:
+            return {
+                "project_path": None,
+                "artifacts": [],
+                "execution_log": execution_log,
+                "results": [],
+            }
+
+        output_dir = settings.generated_dir / f"{safe_project_name}_{timestamp}"
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         artifacts: list[str] = []
         lowered_request = (request_text or "").lower()
@@ -51,10 +61,25 @@ class Executor:
         artifacts.append(str(readme_path))
         execution_log.append(f"Created {len(artifacts)} project files in {output_dir}")
 
+        results = []
+        for artifact_path in artifacts:
+            file_path = Path(artifact_path)
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except Exception:
+                content = ""
+            results.append({
+                "type": "code",
+                "filename": file_path.name,
+                "language": self._infer_language(file_path),
+                "content": content,
+            })
+
         return {
             "project_path": str(output_dir),
             "artifacts": artifacts,
             "execution_log": execution_log,
+            "results": results,
         }
 
     def _create_landing_page_project(self, output_dir: Path, project_name: str, request_text: str) -> list[str]:
@@ -294,12 +319,30 @@ class Executor:
             str(requirements_txt),
         ]
 
-    def write_code_file(self, filename: str, code: str) -> str:
+    def write_code_file(self, filename: str, code: str, execute: bool = True) -> str:
         settings.generated_dir.mkdir(parents=True, exist_ok=True)
         safe_filename = filename.replace("..", "").replace("\\", "/").split("/")[-1]
         target_path = settings.generated_dir / safe_filename
-        target_path.write_text(code, encoding="utf-8")
+        if execute:
+            target_path.write_text(code, encoding="utf-8")
         return str(target_path)
+
+    @staticmethod
+    def _infer_language(file_path: Path) -> str:
+        suffix = file_path.suffix.lower()
+        if suffix == ".html":
+            return "html"
+        if suffix == ".css":
+            return "css"
+        if suffix == ".js":
+            return "javascript"
+        if suffix == ".ts":
+            return "typescript"
+        if suffix == ".py":
+            return "python"
+        if suffix == ".json":
+            return "json"
+        return "text"
 
     @staticmethod
     def _format_step(step: Any) -> str:
@@ -322,5 +365,6 @@ def execute_plan(
     plan: Iterable[Any],
     project_name: str | None = None,
     request_text: str | None = None,
+    execute: bool = False,
 ) -> dict:
-    return executor.execute_plan(plan, project_name=project_name, request_text=request_text)
+    return executor.execute_plan(plan, project_name=project_name, request_text=request_text, execute=execute)

@@ -16,7 +16,10 @@ class AIResult:
     plan: list[str] | None = None
     execution: list[str] | None = None
     code: str | None = None
+    language: str | None = None
+    files: list[dict[str, str]] | None = None
     artifacts: list[str] | None = None
+    requires_approval: bool = False
 
 
 @dataclass
@@ -58,6 +61,9 @@ def _is_change_request(message: str) -> bool:
 
 def _detect_intent(message: str) -> str:
     lowered = message.lower().strip()
+    website_keywords = ["website", "web site", "site", "portfolio", "landing page", "webpage", "frontend", "html", "css", "javascript"]
+    if any(keyword in lowered for keyword in website_keywords):
+        return "project"
     if "build" in lowered or "create" in lowered:
         return "agent"
     if any(keyword in lowered for keyword in ["code", "generate code", "write code", "component", "function", "class"]):
@@ -115,10 +121,77 @@ async def _generate_project(message: str) -> AIResult:
 
     return AIResult(
         response="\n".join(summary),
-        mode="chat",
+        mode="plan",
         plan=plan,
         execution=[],
         artifacts=[],
+        requires_approval=True,
+    )
+
+
+def _project_prompt(message: str) -> str:
+    return (
+        "Generate a complete website project as JSON only. "
+        "Return exactly this structure with no markdown, no explanation, no code fences: "
+        '{"files":[{"name":"index.html","content":"..."},{"name":"style.css","content":"..."},{"name":"script.js","content":"..."}]} '.strip()
+        + f"\nUser request: {message}"
+    )
+
+
+def _parse_project_files(raw: str) -> list[dict[str, str]] | None:
+    candidate = raw.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.strip("`")
+        if candidate.lower().startswith("json"):
+            candidate = candidate[4:].strip()
+
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+
+    files = parsed.get("files") if isinstance(parsed, dict) else None
+    if not isinstance(files, list) or not files:
+        return None
+
+    normalized: list[dict[str, str]] = []
+    for file_item in files:
+        if not isinstance(file_item, dict):
+            continue
+        name = str(file_item.get("name", "")).strip()
+        content = str(file_item.get("content", ""))
+        if not name or not content:
+            continue
+        normalized.append({"name": name, "content": content})
+
+    return normalized or None
+
+
+async def _generate_website_project(message: str) -> AIResult:
+    raw = await call_model(_project_prompt(message), temperature=0.2)
+    files = _parse_project_files(raw)
+
+    if not files:
+        files = [
+            {
+                "name": "index.html",
+                "content": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <title>ASTRA Website</title>\n    <link rel=\"stylesheet\" href=\"style.css\" />\n  </head>\n  <body>\n    <main id=\"app\"></main>\n    <script src=\"script.js\"></script>\n  </body>\n</html>",
+            },
+            {
+                "name": "style.css",
+                "content": "body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0a0a0f;color:#e0e0e6}#app{min-height:100vh;display:grid;place-items:center}",
+            },
+            {
+                "name": "script.js",
+                "content": "document.getElementById('app').innerHTML = '<h1>ASTRA generated website</h1>'",
+            },
+        ]
+
+    return AIResult(
+        response="Website project generated and opened in editor.",
+        mode="project",
+        files=files,
+        requires_approval=False,
     )
 
 
@@ -135,6 +208,7 @@ async def _execute_pending_plan() -> AIResult:
         _pending_plan.plan,
         project_name="astra_project",
         request_text=_pending_plan.request,
+        execute=True,
     )
     landing_entry = next((path for path in execution["artifacts"] if path.endswith("frontend\\index.html")), None)
     response = [
@@ -189,12 +263,17 @@ async def process_input(message: str) -> AIResult:
     if intent == "agent":
         return await _generate_project(message)
 
+    if intent == "project":
+        return await _generate_website_project(message)
+
     if intent == "code":
         code_json, code = await _generate_code(message)
+        parsed = json.loads(code_json)
         return AIResult(
-            response=code_json,
+            response="Code generated and opened in editor.",
             mode="code",
             code=code,
+            language=str(parsed.get("language", "javascript")),
         )
 
     recent_topics = memory_store.recent_topics(limit=5)
@@ -211,3 +290,15 @@ async def chat(message: str) -> AIResult:
     result = await process_input(message)
     memory_store.save_message(message, result.response, mode=result.mode)
     return result
+
+
+def reject_pending_plan() -> bool:
+    global _pending_plan
+    had_pending_plan = _pending_plan is not None
+    _pending_plan = None
+    return had_pending_plan
+
+
+def clear_pending_plan() -> None:
+    global _pending_plan
+    _pending_plan = None

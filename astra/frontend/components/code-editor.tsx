@@ -34,8 +34,17 @@ interface GeneratedCodeEventPayload {
   code?: string
 }
 
+interface EditorStateEventPayload {
+  files: CodeFile[]
+  activeFileId: string
+}
+
 interface CodeEditorProps {
   activeFile?: string
+  initialCode?: string
+  initialLanguage?: string
+  initialFilename?: string
+  initialFiles?: CodeFile[]
 }
 
 interface CommandItem {
@@ -86,7 +95,13 @@ export function Sidebar() {
   },
 ]
 
-export function CodeEditor({ activeFile: initialActiveFile }: CodeEditorProps) {
+export function CodeEditor({
+  activeFile: initialActiveFile,
+  initialCode,
+  initialLanguage,
+  initialFilename,
+  initialFiles,
+}: CodeEditorProps) {
   const [files, setFiles] = useState<CodeFile[]>(SAMPLE_FILES)
   const [activeFile, setActiveFile] = useState(initialActiveFile || SAMPLE_FILES[0].id)
   const [hasLoadedStoredState, setHasLoadedStoredState] = useState(false)
@@ -98,6 +113,7 @@ export function CodeEditor({ activeFile: initialActiveFile }: CodeEditorProps) {
   const [renameValue, setRenameValue] = useState('')
   const editorRef = useRef<MonacoEditorInstance | null>(null)
   const idCounterRef = useRef(1000)
+  const lastExternalCodeRef = useRef('')
 
   const deduplicateFiles = (filesToDeduplicate: CodeFile[]): CodeFile[] => {
     const seen = new Set<string>()
@@ -112,6 +128,16 @@ export function CodeEditor({ activeFile: initialActiveFile }: CodeEditorProps) {
 
   useEffect(() => {
     try {
+      if (initialFiles && initialFiles.length > 0) {
+        const normalizedFiles = deduplicateFiles(initialFiles)
+        setFiles(normalizedFiles)
+        setActiveFile(initialActiveFile && normalizedFiles.some((file) => file.id === initialActiveFile)
+          ? initialActiveFile
+          : normalizedFiles[0].id)
+        setHasLoadedStoredState(true)
+        return
+      }
+
       const savedFiles = window.localStorage.getItem('astra-code-files')
       const savedActiveFile = window.localStorage.getItem('astra-active-file')
 
@@ -149,7 +175,7 @@ export function CodeEditor({ activeFile: initialActiveFile }: CodeEditorProps) {
     } finally {
       setHasLoadedStoredState(true)
     }
-  }, [])
+  }, [initialActiveFile, initialFiles])
 
   useEffect(() => {
     if (!hasLoadedStoredState) {
@@ -176,6 +202,44 @@ export function CodeEditor({ activeFile: initialActiveFile }: CodeEditorProps) {
 
     window.localStorage.setItem('astra-active-file', activeFile)
   }, [activeFile, hasLoadedStoredState])
+
+  useEffect(() => {
+    if (!hasLoadedStoredState) {
+      return
+    }
+
+    const normalizedFiles = deduplicateFiles(files)
+
+    const payload: EditorStateEventPayload = {
+      files: normalizedFiles,
+      activeFileId: activeFile,
+    }
+
+    window.dispatchEvent(new CustomEvent('astra:editor-state', { detail: payload }))
+  }, [activeFile, files, hasLoadedStoredState])
+
+  useEffect(() => {
+    const payloadKey = `${initialFilename || ''}:${initialLanguage || ''}:${initialCode || ''}`
+    if (!initialCode || payloadKey === lastExternalCodeRef.current) {
+      return
+    }
+
+    const filename = initialFilename || `generated-${Date.now()}.${(initialLanguage || 'javascript').toLowerCase() === 'html' ? 'html' : (initialLanguage || 'javascript').toLowerCase() === 'css' ? 'css' : (initialLanguage || 'javascript').toLowerCase() === 'python' ? 'py' : 'js'}`
+    const id = nextFileId()
+    const newFile: CodeFile = {
+      id,
+      name: filename,
+      language: resolveLanguage(initialLanguage, filename),
+      content: initialCode,
+    }
+
+    setFiles((prev) => {
+      const filtered = prev.filter((file) => file.name !== filename)
+      return [newFile, ...filtered]
+    })
+    setActiveFile(id)
+    lastExternalCodeRef.current = payloadKey
+  }, [initialCode, initialFilename, initialLanguage])
 
   // Auto-deduplicate files state if duplicates are detected
   useEffect(() => {

@@ -1,245 +1,164 @@
 ﻿'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { Download, Send, Plus, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Download, Plus, Send } from 'lucide-react'
 import { Message } from './message'
-import { CodeEditor } from './code-view'
+import { useToast } from '@/hooks/use-toast'
 
 const BACKEND_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+
+type FileLanguage = 'typescript' | 'javascript' | 'json' | 'markdown' | 'css' | 'html' | 'python'
+type Sender = 'user' | 'assistant' | 'system'
 
 interface ChatMessage {
   id: string
   content: string
-  sender: 'user' | 'assistant'
+  sender: Sender
   timestamp: Date
 }
 
 interface CodeGenerationPayload {
   type: 'code_generation'
   filename: string
-  language: 'typescript' | 'javascript' | 'json' | 'markdown' | 'css' | 'html' | 'python'
+  language: FileLanguage
   code: string
   summary?: string
 }
 
+interface PendingPlan {
+  plan: string[]
+  request: string
+}
+
 interface AgentResponsePayload {
-  type: 'agent' | 'chat' | 'code'
+  type: 'agent' | 'chat' | 'code' | 'plan' | 'project'
   response: string
   mode?: string
   plan?: string[]
   execution?: string[]
   code?: string | null
+  language?: string | null
+  requiresApproval?: boolean
   artifacts?: string[]
+  files?: Array<{ name: string; content: string }>
+  results?: Array<{ type?: string; filename?: string; language?: string; content?: string }>
 }
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  {
-    id: '1',
-    content: 'Hello! I\'m ASTRA, your AI assistant. How can I help you today?',
-    sender: 'assistant',
-    timestamp: new Date('2026-03-22T14:30:00'),
-  },
-  {
-    id: '2',
-    content: 'Can you help me build a dashboard?',
-    sender: 'user',
-    timestamp: new Date('2026-03-22T14:31:00'),
-  },
-  {
-    id: '3',
-    content: 'Absolutely! I can help you create a beautiful, responsive dashboard. I\'ll start by setting up the project structure and styling, then build interactive components.',
-    sender: 'assistant',
-    timestamp: new Date('2026-03-22T14:31:30'),
-  },
-]
+interface LoadSessionDetail {
+  id: string
+  kind: string
+  title: string
+  messages: Array<{ sender: Sender | string; content: string; timestamp: string }>
+  files: Array<{ id: string; name: string; language: FileLanguage; content: string }>
+}
+
+interface ProjectFile {
+  id: string
+  name: string
+  language: FileLanguage
+  content: string
+}
 
 interface ChatPanelProps {
   focusTrigger?: number
+  onEditorCodeChange?: (code: string) => void
+  onEditorLanguageChange?: (language: string) => void
+  onProjectFilesChange?: (files: ProjectFile[]) => void
+  onProjectActiveFileChange?: (fileId: string) => void
+  onOpenEditor?: () => void
 }
 
-export function ChatPanel({ focusTrigger = 0 }: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES)
-  const [hasLoadedStoredMessages, setHasLoadedStoredMessages] = useState(false)
+const SYSTEM_GREETING: ChatMessage = {
+  id: 'system-startup',
+  content: 'Hello, I am ASTRA — Autonomous System for Tasks, Research & Automation. How can I assist you today?',
+  sender: 'system',
+  timestamp: new Date(),
+}
+
+function createMessageId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function normalizeLanguage(value: string | null | undefined): FileLanguage {
+  const language = (value || '').toLowerCase()
+  if (language === 'ts' || language === 'tsx' || language === 'typescript') return 'typescript'
+  if (language === 'js' || language === 'jsx' || language === 'javascript') return 'javascript'
+  if (language === 'json') return 'json'
+  if (language === 'markdown' || language === 'md') return 'markdown'
+  if (language === 'css') return 'css'
+  if (language === 'html') return 'html'
+  if (language === 'python' || language === 'py') return 'python'
+  return 'javascript'
+}
+
+function makeProjectFiles(files: Array<{ name: string; content: string }>): ProjectFile[] {
+  return files.map((file, index) => ({
+    id: `${file.name}-${index}-${Date.now()}`,
+    name: file.name,
+    language: normalizeLanguage(file.name.split('.').pop()),
+    content: file.content,
+  }))
+}
+
+export function ChatPanel({
+  focusTrigger = 0,
+  onEditorCodeChange,
+  onEditorLanguageChange,
+  onProjectFilesChange,
+  onProjectActiveFileChange,
+  onOpenEditor,
+}: ChatPanelProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking')
-  const [pendingCodeGeneration, setPendingCodeGeneration] = useState<CodeGenerationPayload | null>(null)
-  const [showCodeEditor, setShowCodeEditor] = useState(false)
+  const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
+  const [sessionId, setSessionId] = useState(() => createMessageId())
+  const [sessionTitle, setSessionTitle] = useState('ASTRA Chat')
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { toast } = useToast()
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+  const sanitizeText = (rawResponse: string) => rawResponse.replace(/```[\s\S]*?```/g, '').trim()
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem('astra-chat-messages')
-      if (!saved) {
-        return
-      }
-
-      const parsed = JSON.parse(saved) as Array<Omit<ChatMessage, 'timestamp'> & { timestamp: string }>
-      setMessages(
-        parsed.map((message) => ({
-          ...message,
-          timestamp: new Date(message.timestamp),
-        }))
-      )
-    } catch {
-      // Ignore malformed stored data and continue with initial messages.
-    } finally {
-      setHasLoadedStoredMessages(true)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!hasLoadedStoredMessages) {
-      return
-    }
-
-    window.localStorage.setItem('astra-chat-messages', JSON.stringify(messages))
-  }, [messages, hasLoadedStoredMessages])
-
-  useEffect(() => {
-    if (!hasLoadedStoredMessages) {
-      return
-    }
-
-    const loadBackendHistory = async () => {
-      try {
-        const saved = window.localStorage.getItem('astra-chat-messages')
-        if (saved) {
-          return
-        }
-
-        const response = await fetch(`${BACKEND_BASE_URL}/history?limit=100`)
-        if (!response.ok) {
-          return
-        }
-
-        const data = await response.json() as { history: Array<{ id: number; user_message: string; ai_response: string; timestamp: string }> }
-        if (data.history && data.history.length > 0) {
-          const backendMessages: ChatMessage[] = data.history.flatMap((item) => [
-            {
-              id: `history-user-${item.id}`,
-              content: item.user_message,
-              sender: 'user' as const,
-              timestamp: new Date(item.timestamp),
-            },
-            {
-              id: `history-assistant-${item.id}`,
-              content: item.ai_response,
-              sender: 'assistant' as const,
-              timestamp: new Date(item.timestamp),
-            },
-          ])
-          setMessages((prev) => [...backendMessages, ...prev])
-        }
-      } catch {
-        // Silently fail if backend history unavailable
+  const extractCodeBlocks = (rawResponse: string) => {
+    const blocks: Array<{ language: string; code: string }> = []
+    const regex = /```(\w+)?([\s\S]*?)```/g
+    for (const match of rawResponse.matchAll(regex)) {
+      const language = (match[1] || 'javascript').toLowerCase()
+      const code = (match[2] || '').trim()
+      if (code) {
+        blocks.push({ language, code })
       }
     }
-
-    void loadBackendHistory()
-  }, [hasLoadedStoredMessages])
-
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [focusTrigger])
-
-  useEffect(() => {
-    let mounted = true
-
-    const checkBackendStatus = async () => {
-      try {
-        const response = await fetch(`${BACKEND_BASE_URL}/status`)
-        if (mounted && response.ok) {
-          setBackendStatus('online')
-          return
-        }
-      } catch {
-        // Ignore network errors and mark as offline below.
-      }
-
-      if (mounted) {
-        setBackendStatus('offline')
-      }
-    }
-
-    void checkBackendStatus()
-    const intervalId = window.setInterval(() => {
-      void checkBackendStatus()
-    }, 15000)
-
-    return () => {
-      mounted = false
-      window.clearInterval(intervalId)
-    }
-  }, [])
-
-  const createMessageId = () => {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID()
-    }
-    return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    return blocks
   }
 
-  const tryParseCodeGeneration = (rawResponse: string): CodeGenerationPayload | null => {
-    const normalized = rawResponse.trim()
-    const jsonCandidate = (() => {
-      if (normalized.startsWith('{') && normalized.endsWith('}')) {
-        return normalized
-      }
-
-      const fencedMatch = normalized.match(/```json\s*([\s\S]*?)```/i)
-      return fencedMatch?.[1]?.trim() || ''
-    })()
-
-    if (!jsonCandidate) {
-      return null
-    }
-
-    try {
-      const parsed = JSON.parse(jsonCandidate) as Partial<CodeGenerationPayload>
-      if (
-        parsed.type === 'code_generation'
-        && typeof parsed.filename === 'string'
-        && typeof parsed.language === 'string'
-        && typeof parsed.code === 'string'
-      ) {
-        return {
-          type: 'code_generation',
-          filename: parsed.filename.trim() || 'generated-file.ts',
-          language: parsed.language as CodeGenerationPayload['language'],
-          code: parsed.code,
-          summary: typeof parsed.summary === 'string' ? parsed.summary : undefined,
-        }
-      }
-    } catch {
-      return null
-    }
-
-    return null
+  const dispatchGeneratedCode = (payload: CodeGenerationPayload) => {
+    window.dispatchEvent(new CustomEvent('astra:apply-generated-code', { detail: payload }))
   }
 
-  const applyGeneratedCodeToEditor = () => {
-    if (!pendingCodeGeneration) {
-      return
-    }
-    setShowCodeEditor(true)
+  const applyCodeToEditor = (payload: CodeGenerationPayload) => {
+    onEditorCodeChange?.(payload.code)
+    onEditorLanguageChange?.(payload.language)
+    dispatchGeneratedCode(payload)
+    onOpenEditor?.()
+    toast({ title: 'Code loaded in editor', description: payload.filename })
   }
 
   const parseAgentResponse = async (message: string) => {
     const response = await fetch(`${BACKEND_BASE_URL}/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
     })
 
@@ -250,24 +169,240 @@ export function ChatPanel({ focusTrigger = 0 }: ChatPanelProps) {
     return response.json() as Promise<AgentResponsePayload>
   }
 
-  const getAssistantResponse = async (message: string) => {
-    const chatData = await parseAgentResponse(message)
-    return chatData
+  const persistSession = async () => {
+    const payload = {
+      id: sessionId,
+      kind: projectFiles.length > 0 ? 'project' : 'chat',
+      title: sessionTitle,
+      messages: messages.map((message) => ({
+        sender: message.sender,
+        content: message.content,
+        timestamp: message.timestamp.toISOString(),
+      })),
+      files: projectFiles,
+    }
+
+    try {
+      await fetch(`${BACKEND_BASE_URL}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    } catch {
+      // Local state is still preserved.
+    }
+  }
+
+  const archiveCurrentSession = async () => {
+    await persistSession()
+    window.dispatchEvent(new CustomEvent('astra:session-updated'))
+  }
+
+  const queuePersistSession = () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      void persistSession()
+    }, 450)
+  }
+
+  const addAssistantMessage = (content: string) => {
+    setMessages((prev) => [...prev, { id: createMessageId(), content, sender: 'assistant', timestamp: new Date() }])
+  }
+
+  const handleSessionLoad = (event: Event) => {
+    const detail = (event as CustomEvent<LoadSessionDetail>).detail
+    if (!detail) {
+      return
+    }
+
+    setSessionId(detail.id)
+    setSessionTitle(detail.title)
+    setMessages(
+      detail.messages.map((message, index) => ({
+        id: `${detail.id}-${index}`,
+        sender: message.sender === 'system' ? 'system' : message.sender === 'assistant' ? 'assistant' : 'user',
+        content: message.content,
+        timestamp: new Date(message.timestamp),
+      })),
+    )
+
+    const loadedFiles = detail.files || []
+    setProjectFiles(loadedFiles)
+    onProjectFilesChange?.(loadedFiles)
+    onProjectActiveFileChange?.(loadedFiles[0]?.id || '')
+
+    if (loadedFiles.length > 0) {
+      const firstFile = loadedFiles[0]
+      applyCodeToEditor({
+        type: 'code_generation',
+        filename: firstFile.name,
+        language: firstFile.language,
+        code: firstFile.content,
+        summary: 'Loaded from saved project.',
+      })
+    }
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  useEffect(() => {
+    const initialize = async () => {
+      try {
+        const response = await fetch(`${BACKEND_BASE_URL}/history`)
+        if (response.ok) {
+          // Sidebar loads the list; this keeps the API warm and confirms availability.
+        }
+      } catch {
+        // Ignore initialization errors.
+      }
+
+      const savedMessages = window.localStorage.getItem('astra-chat-messages')
+      if (savedMessages) {
+        try {
+          const parsed = JSON.parse(savedMessages) as Array<{ id: string; sender: Sender; content: string; timestamp: string }>
+          if (parsed.length > 0) {
+            setMessages(parsed.map((message) => ({
+              id: message.id,
+              sender: message.sender,
+              content: message.content,
+              timestamp: new Date(message.timestamp),
+            })))
+            return
+          }
+        } catch {
+          // ignore malformed cache
+        }
+      }
+
+      setMessages([SYSTEM_GREETING])
+    }
+
+    void initialize()
+    window.addEventListener('astra:load-session', handleSessionLoad as EventListener)
+    window.addEventListener('astra:new-chat', handleNewChat as EventListener)
+
+    return () => {
+      window.removeEventListener('astra:load-session', handleSessionLoad as EventListener)
+      window.removeEventListener('astra:new-chat', handleNewChat as EventListener)
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!messages.length) {
+      return
+    }
+    window.localStorage.setItem('astra-chat-messages', JSON.stringify(messages))
+    queuePersistSession()
+  }, [messages, projectFiles, sessionId, sessionTitle])
+
+  useEffect(() => {
+    let mounted = true
+    const checkBackendStatus = async () => {
+      try {
+        const response = await fetch(`${BACKEND_BASE_URL}/status`)
+        if (mounted && response.ok) {
+          setBackendStatus('online')
+          return
+        }
+      } catch {
+        // ignore
+      }
+      if (mounted) {
+        setBackendStatus('offline')
+      }
+    }
+
+    void checkBackendStatus()
+    const intervalId = window.setInterval(() => void checkBackendStatus(), 15000)
+    return () => {
+      mounted = false
+      window.clearInterval(intervalId)
+    }
+  }, [])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [focusTrigger])
+
+  const handleNewChat = async () => {
+    await archiveCurrentSession()
+    const nextSessionId = createMessageId()
+    setSessionId(nextSessionId)
+    setSessionTitle('ASTRA Chat')
+    setProjectFiles([])
+    onProjectFilesChange?.([])
+    onProjectActiveFileChange?.('')
+    setPendingPlan(null)
+    setInput('')
+    setMessages([SYSTEM_GREETING])
+  }
+
+  const handleApprovePlan = async () => {
+    if (!pendingPlan) return
+
+    setIsThinking(true)
+    try {
+      const response = await fetch(`${BACKEND_BASE_URL}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: pendingPlan.plan, request: pendingPlan.request }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || 'Unable to execute plan')
+      }
+
+      const result = await response.json() as { results?: Array<{ type?: string; filename?: string; language?: string; content?: string }> }
+      console.log('AI Response:', result)
+
+      const firstCode = result.results?.find((item) => item.type === 'code' && typeof item.content === 'string')
+      if (firstCode?.content) {
+        applyCodeToEditor({
+          type: 'code_generation',
+          filename: firstCode.filename || 'generated-file.html',
+          language: normalizeLanguage(firstCode.language),
+          code: firstCode.content,
+        })
+        addAssistantMessage('✅ Code loaded in editor')
+      } else {
+        addAssistantMessage('✅ Plan approved and executed')
+      }
+
+      setPendingPlan(null)
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : 'Could not execute the pending plan.'
+      toast({ title: 'Execution failed', description: message, variant: 'destructive' })
+    } finally {
+      setIsThinking(false)
+    }
+  }
+
+  const handleRejectPlan = async () => {
+    setPendingPlan(null)
+    addAssistantMessage('Plan rejected')
+    try {
+      await fetch(`${BACKEND_BASE_URL}/reject`, { method: 'POST' })
+    } catch {
+      // ignore
+    }
   }
 
   const handleSendMessage = async () => {
     if (!input.trim()) return
 
-    const userInput = input.trim()
-
-    if (userInput.toLowerCase() === '/clear') {
-      handleNewChat()
-      return
-    }
+    const userText = input.trim()
 
     const userMessage: ChatMessage = {
       id: createMessageId(),
-      content: userInput,
+      content: userText,
       sender: 'user',
       timestamp: new Date(),
     }
@@ -276,52 +411,74 @@ export function ChatPanel({ focusTrigger = 0 }: ChatPanelProps) {
     setInput('')
     setIsThinking(true)
 
+    if (sessionTitle === 'ASTRA Chat' && userText.length > 0) {
+      setSessionTitle(userText.slice(0, 48))
+    }
+
     try {
-      const assistantResponse = await getAssistantResponse(userMessage.content)
-      const generatedPayload = assistantResponse.type === 'code'
-        ? tryParseCodeGeneration(assistantResponse.response)
-        : null
+      const assistantResponse = await parseAgentResponse(userText)
+      console.log('AI Response:', assistantResponse)
 
-      if (generatedPayload) {
-        setPendingCodeGeneration(generatedPayload)
+      if (assistantResponse.type === 'project' && assistantResponse.files && assistantResponse.files.length > 0) {
+        const normalizedFiles = makeProjectFiles(assistantResponse.files)
+        setProjectFiles(normalizedFiles)
+        onProjectFilesChange?.(normalizedFiles)
+        onProjectActiveFileChange?.(normalizedFiles[0]?.id || '')
+
+        const firstFile = normalizedFiles[0]
+        applyCodeToEditor({
+          type: 'code_generation',
+          filename: firstFile.name,
+          language: firstFile.language,
+          code: firstFile.content,
+          summary: 'Website project loaded into the editor.',
+        })
+
+        addAssistantMessage('✅ Website project loaded in editor')
+        return
       }
 
-      const assistantMessage: ChatMessage = {
-        id: createMessageId(),
-        content: assistantResponse.type === 'agent'
-          ? assistantResponse.response
-          : assistantResponse.type === 'code'
-            ? (generatedPayload?.summary || 'ASTRA generated code successfully.')
-            : assistantResponse.response,
-        sender: 'assistant',
-        timestamp: new Date(),
+      if (assistantResponse.type === 'plan' || assistantResponse.requiresApproval || (assistantResponse.plan && assistantResponse.plan.length > 0)) {
+        setPendingPlan({ plan: assistantResponse.plan || [], request: userMessage.content })
+        addAssistantMessage(sanitizeText(assistantResponse.response))
+        return
       }
-      setMessages((prev) => [...prev, assistantMessage])
+
+      if (assistantResponse.type === 'code' || assistantResponse.code) {
+        const code = assistantResponse.code || ''
+        const language = normalizeLanguage(assistantResponse.language)
+        applyCodeToEditor({
+          type: 'code_generation',
+          filename: assistantResponse.language === 'html' ? 'generated.html' : language === 'css' ? 'generated.css' : language === 'python' ? 'generated.py' : 'generated.js',
+          language,
+          code,
+          summary: assistantResponse.response,
+        })
+        addAssistantMessage('✅ Code generated and opened in editor')
+        return
+      }
+
+      const codeBlocks = extractCodeBlocks(assistantResponse.response)
+      if (codeBlocks.length > 0) {
+        const firstBlock = codeBlocks[0]
+        const normalizedLanguage = normalizeLanguage(firstBlock.language)
+        applyCodeToEditor({
+          type: 'code_generation',
+          filename: `generated-${Date.now()}.${normalizedLanguage === 'html' ? 'html' : normalizedLanguage === 'css' ? 'css' : normalizedLanguage === 'python' ? 'py' : normalizedLanguage === 'typescript' ? 'ts' : 'js'}`,
+          language: normalizedLanguage,
+          code: firstBlock.code,
+        })
+        addAssistantMessage('✅ Code generated and opened in editor')
+        return
+      }
+
+      addAssistantMessage(sanitizeText(assistantResponse.response))
     } catch {
-      const errorMessage: ChatMessage = {
-        id: createMessageId(),
-        content: 'I could not reach the backend. Please check if it is running on port 8000.',
-        sender: 'assistant',
-        timestamp: new Date(),
-      }
-
-      setMessages((prev) => [...prev, errorMessage])
+      toast({ title: 'AI failed, try again', description: 'Could not reach backend provider.', variant: 'destructive' })
+      addAssistantMessage('I could not reach the backend. Please check if it is running on port 8000.')
     } finally {
       setIsThinking(false)
     }
-  }
-
-  const handleNewChat = () => {
-    setIsThinking(false)
-    setInput('')
-    setMessages([
-      {
-        id: createMessageId(),
-        content: 'New chat created. What would you like to work on?',
-        sender: 'assistant',
-        timestamp: new Date(),
-      },
-    ])
   }
 
   const handleExportTranscript = () => {
@@ -342,30 +499,7 @@ export function ChatPanel({ focusTrigger = 0 }: ChatPanelProps) {
     URL.revokeObjectURL(url)
   }
 
-  if (showCodeEditor && pendingCodeGeneration) {
-    return (
-      <div className="flex flex-col h-full bg-[#0a0a0f] border-r border-[#1a1a2e]">
-        <div className="flex items-center justify-between p-3 border-b border-[#1a1a2e] bg-[#0f0f17]">
-          <span className="text-sm font-medium text-[#e0e0e6]">Code Editor</span>
-          <button
-            onClick={() => setShowCodeEditor(false)}
-            className="p-1 hover:bg-[#1a1a2e] rounded transition-colors"
-          >
-            <X className="w-4 h-4 text-[#a0a0a6]" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-hidden">
-          <CodeEditor
-            filename={pendingCodeGeneration.filename}
-            code={pendingCodeGeneration.code}
-            language={pendingCodeGeneration.language}
-            projectName="astra-project"
-            onClose={() => setShowCodeEditor(false)}
-          />
-        </div>
-      </div>
-    )
-  }
+  const normalizedTitle = useMemo(() => sessionTitle || 'ASTRA Chat', [sessionTitle])
 
   return (
     <div className="flex flex-col h-full bg-[#0a0a0f] border-r border-[#1a1a2e]">
@@ -373,7 +507,7 @@ export function ChatPanel({ focusTrigger = 0 }: ChatPanelProps) {
         <div>
           <h2 className="text-lg font-semibold text-[#e0e0e6]">Chat</h2>
           <p className="text-xs text-[#a0a0a6] flex items-center gap-2">
-            <span>ASTRA Assistant</span>
+            <span>{normalizedTitle}</span>
             <span
               className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] leading-none ${
                 backendStatus === 'online'
@@ -418,13 +552,27 @@ export function ChatPanel({ focusTrigger = 0 }: ChatPanelProps) {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
-          <Message
-            key={message.id}
-            content={message.content}
-            sender={message.sender}
-            timestamp={message.timestamp}
-          />
+          <Message key={message.id} content={message.content} sender={message.sender} timestamp={message.timestamp} />
         ))}
+
+        {pendingPlan && (
+          <div className="rounded-lg border border-[#00d9ff]/40 bg-[#0f1720] p-3">
+            <p className="text-sm font-semibold text-[#e0e0e6] mb-2">Proposed Plan</p>
+            <ol className="space-y-1 text-sm text-[#cbd5e1] list-decimal pl-4">
+              {pendingPlan.plan.map((step, index) => (
+                <li key={`plan-step-${index}`}>{step}</li>
+              ))}
+            </ol>
+            <div className="flex gap-2 mt-3">
+              <button type="button" onClick={handleApprovePlan} className="px-3 py-1.5 rounded-md bg-[#00d9ff] text-[#0a0a0f] text-xs font-semibold">
+                Approve ✅
+              </button>
+              <button type="button" onClick={handleRejectPlan} className="px-3 py-1.5 rounded-md bg-[#1a1a2e] text-[#e0e0e6] text-xs">
+                Reject ❌
+              </button>
+            </div>
+          </div>
+        )}
 
         {isThinking && (
           <div className="flex gap-4">
@@ -434,31 +582,6 @@ export function ChatPanel({ focusTrigger = 0 }: ChatPanelProps) {
             <div className="flex items-center gap-1 bg-[#141420] border border-[#b100ff]/30 rounded-lg px-4 py-3 glow-box-violet">
               <span className="text-sm text-[#e0e0e6]">ASTRA is thinking</span>
               <span className="animate-typing">...</span>
-            </div>
-          </div>
-        )}
-
-        {pendingCodeGeneration && (
-          <div className="rounded-lg border border-[#00d9ff]/40 bg-[#0f1720] p-3">
-            <p className="text-sm text-[#e0e0e6]">
-              Generated file ready: <span className="text-[#00d9ff]">{pendingCodeGeneration.filename}</span>
-            </p>
-            <p className="text-xs text-[#a0a0a6] mt-1">Language: {pendingCodeGeneration.language}</p>
-            <div className="flex gap-2 mt-3">
-              <button
-                type="button"
-                onClick={applyGeneratedCodeToEditor}
-                className="px-3 py-1.5 rounded-md bg-[#00d9ff] text-[#0a0a0f] text-xs font-semibold"
-              >
-                View in Editor
-              </button>
-              <button
-                type="button"
-                onClick={() => setPendingCodeGeneration(null)}
-                className="px-3 py-1.5 rounded-md bg-[#1a1a2e] text-[#a0a0a6] text-xs"
-              >
-                Dismiss
-              </button>
             </div>
           </div>
         )}

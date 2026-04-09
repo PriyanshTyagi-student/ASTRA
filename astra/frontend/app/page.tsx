@@ -11,6 +11,12 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [activeSection, setActiveSection] = useState<SidebarSection>('chat')
   const [chatFocusTrigger, setChatFocusTrigger] = useState(0)
+  const [editorCode, setEditorCode] = useState('')
+  const [editorLanguage, setEditorLanguage] = useState('javascript')
+  const [projectFiles, setProjectFiles] = useState<Array<{ id: string; name: string; language: 'typescript' | 'javascript' | 'json' | 'markdown' | 'css' | 'html' | 'python'; content: string }>>([])
+  const [projectActiveFileId, setProjectActiveFileId] = useState('')
+  const [previewVisible, setPreviewVisible] = useState(false)
+  const [requestedWorkspaceTab, setRequestedWorkspaceTab] = useState<'chat' | 'editor' | 'preview' | null>(null)
 
   const handleSectionChange = (section: SidebarSection) => {
     setActiveSection(section)
@@ -28,7 +34,7 @@ export default function Dashboard() {
       <HolographicOrb />
 
       {/* Main Content */}
-      <div className="relative z-10 flex w-full h-full">
+      <div className="relative z-10 flex w-full h-full min-h-0 overflow-hidden">
         {/* Sidebar */}
         <div
           className={`hidden md:flex transition-all duration-300 ${
@@ -78,15 +84,76 @@ export default function Dashboard() {
         )}
 
         {/* Main Panel - Split Layout */}
-        <div className="flex-1 flex gap-0 flex-col md:flex-row">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden gap-0">
+          <div className="hidden md:flex shrink-0 items-center gap-2 border-b border-[#1a1a2e] bg-[#0f0f17]/70 px-4 py-2">
+            {[
+              { id: 'chat', label: 'Chat' },
+              { id: 'editor', label: 'Editor' },
+              { id: 'preview', label: 'Preview' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  if (item.id === 'chat') {
+                    setChatFocusTrigger((prev) => prev + 1)
+                    setRequestedWorkspaceTab('chat')
+                    setPreviewVisible(false)
+                    return
+                  }
+
+                  if (item.id === 'editor') {
+                    setRequestedWorkspaceTab('editor')
+                    setPreviewVisible(false)
+                    return
+                  }
+
+                  setRequestedWorkspaceTab('preview')
+                  setPreviewVisible(true)
+                }}
+                className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+                  (item.id === 'chat' && !previewVisible)
+                    ? 'border-[#00d9ff]/50 text-[#00d9ff] bg-[#141420]'
+                    : (item.id === 'preview' && previewVisible)
+                      ? 'border-[#b100ff]/50 text-[#b100ff] bg-[#141420]'
+                      : 'border-[#1a1a2e] text-[#a0a0a6] hover:text-[#e0e0e6]'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 flex min-h-0 gap-0 flex-col md:flex-row overflow-hidden">
           {/* Left Panel - Chat */}
-          <div className="w-full md:w-1/2 flex flex-col min-w-0 order-2 md:order-1">
-            <ChatPanel focusTrigger={chatFocusTrigger} />
+          <div className="w-full md:w-1/2 flex flex-col min-w-0 min-h-0 order-2 md:order-1 overflow-hidden">
+            <ChatPanel
+              focusTrigger={chatFocusTrigger}
+              onEditorCodeChange={setEditorCode}
+              onEditorLanguageChange={setEditorLanguage}
+              onProjectFilesChange={setProjectFiles}
+              onProjectActiveFileChange={setProjectActiveFileId}
+              onOpenEditor={() => {
+                setRequestedWorkspaceTab('editor')
+                setPreviewVisible(false)
+              }}
+            />
           </div>
 
           {/* Right Panel - Code/Logs */}
-          <div className="w-full md:w-1/2 flex flex-col min-w-0 order-1 md:order-2 border-t md:border-t-0 md:border-l border-[#1a1a2e]">
-            <Workspace key={activeSection} activeSection={activeSection} />
+          <div className="w-full md:w-1/2 flex flex-col min-w-0 min-h-0 order-1 md:order-2 border-t md:border-t-0 md:border-l border-[#1a1a2e] overflow-hidden">
+            <Workspace
+              key={activeSection}
+              activeSection={activeSection}
+              requestedTab={requestedWorkspaceTab}
+              editorCode={editorCode}
+              editorLanguage={editorLanguage}
+              projectFiles={projectFiles}
+              projectActiveFileId={projectActiveFileId}
+              previewVisible={previewVisible}
+              onPreviewVisibleChange={setPreviewVisible}
+            />
+          </div>
           </div>
         </div>
       </div>

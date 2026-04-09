@@ -1,11 +1,14 @@
 ﻿from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.schemas.chat import ChatRequest, ChatResponse, CodeRequest, ProjectRequest, HistoryItem, HistoryResponse
-from app.services.ai_service import chat as chat_service, process_input
+from app.schemas.chat import ChatRequest, ChatResponse, CodeRequest, ProjectRequest, HistoryItem, HistoryResponse, ExecuteRequest, SaveSessionRequest, SessionListResponse, SessionRecord
+from app.services.ai_service import chat as chat_service, process_input, reject_pending_plan, clear_pending_plan
+from app.services.executor import execute_plan
 from app.services.memory import memory_store
 from app.services.file_service import FileService
 
@@ -30,11 +33,14 @@ async def command_route(request: ChatRequest) -> dict:
 async def chat_route(request: ChatRequest) -> ChatResponse:
     result = await chat_service(request.message)
     return ChatResponse(
-        type="code" if result.mode == "code" else "chat",
+        type="project" if result.mode == "project" else ("code" if result.mode == "code" else ("plan" if result.mode == "plan" else "chat")),
         response=result.response,
         mode=result.mode,
         plan=result.plan or [],
         code=result.code,
+        language=result.language,
+        requiresApproval=result.requires_approval,
+        files=result.files or [],
         execution=result.execution or [],
         artifacts=result.artifacts or [],
     )
@@ -44,11 +50,14 @@ async def chat_route(request: ChatRequest) -> ChatResponse:
 async def generate_code_route(request: CodeRequest) -> ChatResponse:
     result = await process_input(f"Generate code: {request.prompt} in {request.language}")
     return ChatResponse(
-        type="code" if result.mode == "code" else "chat",
+        type="project" if result.mode == "project" else ("code" if result.mode == "code" else ("plan" if result.mode == "plan" else "chat")),
         response=result.response,
         mode=result.mode,
         plan=result.plan or [],
         code=result.code,
+        language=result.language,
+        requiresApproval=result.requires_approval,
+        files=result.files or [],
         execution=result.artifacts or [],
         artifacts=result.artifacts or [],
     )
@@ -58,20 +67,67 @@ async def generate_code_route(request: CodeRequest) -> ChatResponse:
 async def generate_project_route(request: ProjectRequest) -> ChatResponse:
     result = await process_input(f"Create project: {request.prompt}")
     return ChatResponse(
-        type="agent" if result.mode == "agent" else "chat",
+        type="project" if result.mode == "project" else ("plan" if result.mode == "plan" else ("code" if result.mode == "code" else "chat")),
         response=result.response,
         mode=result.mode,
         plan=result.plan or [],
         code=result.code,
+        language=result.language,
+        requiresApproval=result.requires_approval,
+        files=result.files or [],
         execution=result.artifacts or [],
         artifacts=result.artifacts or [],
     )
 
 
-@router.get("/history", response_model=HistoryResponse)
-async def history_route(limit: int = Query(100, ge=1, le=500)) -> HistoryResponse:
-    history = [HistoryItem.model_validate(item) for item in memory_store.get_history(limit=limit)]
-    return HistoryResponse(history=history, total=len(history))
+@router.post("/execute")
+async def execute_plan_route(request: ExecuteRequest) -> dict:
+    result = execute_plan(request.plan, project_name="astra_project", request_text=request.request, execute=True)
+    clear_pending_plan()
+    return result
+
+
+@router.post("/save")
+async def save_session_route(request: SaveSessionRequest) -> dict:
+    saved = memory_store.save_session(
+        session_id=request.id,
+        title=request.title,
+        messages=[message.model_dump() for message in request.messages],
+        files=[file.model_dump() for file in request.files],
+        kind=request.kind,
+    )
+    return {"session": saved}
+
+
+@router.post("/reject")
+async def reject_plan_route() -> dict:
+    rejected = reject_pending_plan()
+    return {
+        "rejected": rejected,
+        "message": "Plan rejected" if rejected else "No pending plan",
+    }
+
+
+@router.get("/history", response_model=SessionListResponse)
+async def session_history_route() -> SessionListResponse:
+    sessions = [SessionRecord.model_validate(item) for item in memory_store.list_sessions()]
+    return SessionListResponse(sessions=sessions)
+
+
+@router.get("/history/{session_id}", response_model=SessionRecord)
+async def session_detail_route(session_id: str) -> SessionRecord:
+    session = memory_store.get_session(session_id)
+    if session is None:
+        return SessionRecord(
+            id=session_id,
+            kind="chat",
+            title="Missing session",
+            messages=[],
+            files=[],
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+    return SessionRecord.model_validate(session)
 
 
 @router.get("/memory", response_model=HistoryResponse)

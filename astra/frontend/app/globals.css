@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import 'prismjs/themes/prism-tomorrow.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -249,4 +250,20 @@
 
 .animate-stream-in {
   animation: stream-in 0.5s ease-out;
+}
+
+.message-markdown p {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.message-markdown ul,
+.message-markdown ol {
+  padding-left: 1.25rem;
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.message-markdown li + li {
+  margin-top: 0.15rem;
 }

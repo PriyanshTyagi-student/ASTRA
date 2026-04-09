@@ -2,56 +2,73 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { CodeEditor } from './code-editor'
+import { LivePreview } from './live-preview'
 import { LogsPanel } from './logs-panel'
 import { StatusBar } from './status-bar'
 import type { SidebarSection } from './sidebar'
 
-type Tab = 'code' | 'logs' | 'projects' | 'settings'
+type WorkspaceTab = 'editor' | 'preview' | 'logs' | 'projects' | 'settings'
 
 interface WorkspaceProps {
   activeSection: SidebarSection
+  requestedTab?: 'chat' | 'editor' | 'preview' | null
+  editorCode?: string
+  editorLanguage?: string
+  projectFiles?: Array<{ id: string; name: string; language: 'typescript' | 'javascript' | 'json' | 'markdown' | 'css' | 'html' | 'python'; content: string }>
+  projectActiveFileId?: string
+  previewVisible?: boolean
+  onPreviewVisibleChange?: (value: boolean) => void
 }
 
-export function Workspace({ activeSection }: WorkspaceProps) {
-  const sectionToTab: Record<SidebarSection, Tab> = {
-    chat: 'code',
-    files: 'code',
+export function Workspace({
+  activeSection,
+  requestedTab = null,
+  editorCode = '',
+  editorLanguage = 'javascript',
+  projectFiles = [],
+  projectActiveFileId = '',
+  previewVisible = false,
+  onPreviewVisibleChange,
+}: WorkspaceProps) {
+  const defaultProject = 'astra-dashboard'
+  const sectionToTab: Record<SidebarSection, WorkspaceTab> = {
+    chat: 'editor',
+    files: 'editor',
     projects: 'projects',
     settings: 'settings',
   }
 
-  const [activeTab, setActiveTab] = useState<Tab>(sectionToTab[activeSection])
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(sectionToTab[activeSection])
   const [projectName, setProjectName] = useState('')
-  const [projects, setProjects] = useState<string[]>(() => {
-    if (typeof window === 'undefined') {
-      return ['astra-dashboard']
-    }
-
-    try {
-      const saved = window.localStorage.getItem('astra-projects')
-      if (!saved) {
-        return ['astra-dashboard']
-      }
-      const parsed = JSON.parse(saved) as string[]
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['astra-dashboard']
-    } catch {
-      return ['astra-dashboard']
-    }
-  })
-  const [activeProject, setActiveProject] = useState(() => {
-    if (typeof window === 'undefined') {
-      return 'astra-dashboard'
-    }
-    return window.localStorage.getItem('astra-active-project') || 'astra-dashboard'
-  })
+  const [projects, setProjects] = useState<string[]>([defaultProject])
+  const [activeProject, setActiveProject] = useState(defaultProject)
   const [settingsSaved, setSettingsSaved] = useState(false)
-  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
-    if (typeof window === 'undefined') {
-      return true
-    }
-    return window.localStorage.getItem('astra-notifications-enabled') !== 'false'
-  })
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true)
   const saveFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    try {
+      const savedProjects = window.localStorage.getItem('astra-projects')
+      if (savedProjects) {
+        const parsedProjects = JSON.parse(savedProjects) as string[]
+        if (Array.isArray(parsedProjects) && parsedProjects.length > 0) {
+          setProjects(parsedProjects)
+        }
+      }
+
+      const savedActiveProject = window.localStorage.getItem('astra-active-project')
+      if (savedActiveProject) {
+        setActiveProject(savedActiveProject)
+      }
+
+      const savedNotifications = window.localStorage.getItem('astra-notifications-enabled')
+      if (savedNotifications !== null) {
+        setNotificationsEnabled(savedNotifications !== 'false')
+      }
+    } catch {
+      // Keep defaults when persisted values are malformed.
+    }
+  }, [])
 
   useEffect(() => {
     window.localStorage.setItem('astra-projects', JSON.stringify(projects))
@@ -64,6 +81,32 @@ export function Workspace({ activeSection }: WorkspaceProps) {
   useEffect(() => {
     window.localStorage.setItem('astra-notifications-enabled', String(notificationsEnabled))
   }, [notificationsEnabled])
+
+  useEffect(() => {
+    if (requestedTab === 'editor') {
+      setActiveTab('editor')
+      return
+    }
+
+    if (requestedTab === 'preview') {
+      setActiveTab('preview')
+      return
+    }
+
+    if (requestedTab === 'chat') {
+      setActiveTab('editor')
+    }
+  }, [requestedTab])
+
+  useEffect(() => {
+    if (previewVisible) {
+      setActiveTab('preview')
+    }
+  }, [previewVisible])
+
+  useEffect(() => {
+    onPreviewVisibleChange?.(activeTab === 'preview')
+  }, [activeTab, onPreviewVisibleChange])
 
   useEffect(() => {
     return () => {
@@ -80,8 +123,9 @@ export function Workspace({ activeSection }: WorkspaceProps) {
         ? 'completed'
         : 'idle'
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'code', label: 'Code' },
+  const tabs: { id: WorkspaceTab; label: string }[] = [
+    { id: 'editor', label: 'Editor' },
+    { id: 'preview', label: 'Preview' },
     { id: 'logs', label: 'Logs' },
     { id: 'projects', label: 'Projects' },
     { id: 'settings', label: 'Settings' },
@@ -104,9 +148,9 @@ export function Workspace({ activeSection }: WorkspaceProps) {
     setProjects((prev) => {
       const updatedProjects = prev.filter((project) => project !== projectToRemove)
       if (projectToRemove === activeProject) {
-        setActiveProject(updatedProjects[0] || 'astra-dashboard')
+        setActiveProject(updatedProjects[0] || defaultProject)
       }
-      return updatedProjects.length > 0 ? updatedProjects : ['astra-dashboard']
+      return updatedProjects.length > 0 ? updatedProjects : [defaultProject]
     })
   }
 
@@ -121,7 +165,7 @@ export function Workspace({ activeSection }: WorkspaceProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[#0a0a0f]">
+    <div className="flex-1 flex flex-col min-h-0 h-full bg-[#0a0a0f] overflow-hidden">
       {/* Tab Navigation */}
       <div className="flex items-center border-b border-[#1a1a2e] bg-[#0f0f17]/50">
         <div className="flex gap-1 p-2">
@@ -143,8 +187,21 @@ export function Workspace({ activeSection }: WorkspaceProps) {
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'code' && <CodeEditor />}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {activeTab === 'editor' && (
+          <CodeEditor
+            initialFiles={projectFiles}
+            activeFile={projectActiveFileId || undefined}
+            initialCode={editorCode}
+            initialLanguage={editorLanguage}
+            initialFilename={editorLanguage === 'html' ? 'generated.html' : editorLanguage === 'css' ? 'generated.css' : editorLanguage === 'python' ? 'generated.py' : 'generated.js'}
+          />
+        )}
+        {activeTab === 'preview' && (
+          <div className="h-full min-h-0 p-4">
+            <LivePreview editorCode={editorCode} editorLanguage={editorLanguage} />
+          </div>
+        )}
         {activeTab === 'logs' && <LogsPanel />}
         {activeTab === 'projects' && (
           <div className="h-full overflow-y-auto p-5 space-y-4">

@@ -153,11 +153,19 @@ Parses and structures commands for execution.
 - Set: `AI_PROVIDER=openai`
 - Requires: `OPENAI_API_KEY`
 
+### Hugging Face
+- Model: `Qwen/Qwen2.5-7B-Instruct` (default)
+- Set: `AI_PROVIDER=huggingface`
+- Requires: `HUGGINGFACE_API_KEY` or `HF_TOKEN`
+- Automatic fallback models: `mistralai/Mistral-7B-Instruct-v0.3`, `HuggingFaceH4/zephyr-7b-beta`
+
 ### Groq (Recommended)
 - Model: `llama-3.3-70b-versatile`
 - Set: `AI_PROVIDER=groq`
 - Requires: `GROQ_API_KEY`
 - Benefits: Faster, free tier available
+
+If you prefer a different Hugging Face model, set `HUGGINGFACE_MODEL` in your `.env` file.
 
 ## 💾 Database
 
